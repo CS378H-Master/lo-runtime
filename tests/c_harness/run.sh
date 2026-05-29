@@ -20,6 +20,13 @@ expected=$'42'
 cxx="${CXX:-c++}"
 fail=0
 
+# On Linux the default driver links PIE, but the Zig and C++ static libraries are
+# built non-PIC, so their objects can't go into a PIE executable
+# (R_X86_64_32S ... can not be used when making a PIE object). Link the harness
+# binaries non-PIE there. macOS clang neither needs nor accepts -no-pie.
+nopie=""
+[[ "$(uname -s)" == "Linux" ]] && nopie="-no-pie"
+
 run_check() {
   local name="$1" bin="$2" out
   out="$("$bin")"
@@ -32,14 +39,27 @@ run_check() {
 }
 
 # Rust — link against the native libs rustc reports for the staticlib, so this
-# works on Linux (needs -lpthread -ldl -lm …) as well as macOS.
+# works on Linux (needs -lpthread -ldl -lm …) as well as macOS. We drop the -lc
+# token: the C driver (`cc`) appends libc itself, and an explicit `-lc` fails to
+# resolve on some Linux runners ("cannot find -lc").
+#
+# Color must be forced off: CI sets CARGO_TERM_COLOR=always, which makes cargo
+# wrap the native-static-libs note in ANSI escapes — the trailing token then
+# reads as "-lc"+escape, slips past the filter, and is handed to ld as a garbled
+# lib name. `--color never` + stripping CR keeps the tokens clean.
 rust_lib="$root/rust/target/debug/liblo_runtime.a"
 if [[ -f "$rust_lib" ]]; then
-  rust_libs="$(cd "$root/rust" \
-    && cargo rustc -q --lib -- --print native-static-libs 2>&1 \
-    | sed -n 's/.*native-static-libs: //p' | head -1 || true)"
+  rust_note="$(cd "$root/rust" \
+    && CARGO_TERM_COLOR=never cargo rustc -q --color never --lib -- \
+       --print native-static-libs 2>&1 \
+    | grep -m1 'native-static-libs:' | tr -d '\r' || true)"
+  read -ra _rust_toks <<<"${rust_note##*native-static-libs: }"
+  rust_libs=()
+  for _t in "${_rust_toks[@]}"; do
+    [[ -z "$_t" || "$_t" == "-lc" ]] || rust_libs+=("$_t")
+  done
   # shellcheck disable=SC2086
-  cc "$obj" "$rust_lib" ${rust_libs:-} -o "$tmp/rust"
+  cc $nopie "$obj" "$rust_lib" "${rust_libs[@]}" -o "$tmp/rust"
   run_check "rust" "$tmp/rust"
 else
   echo "  rust: lib not built (cd rust && cargo build), skipped" >&2
@@ -48,7 +68,8 @@ fi
 # Zig — std uses raw syscalls, no extra libs needed beyond what cc links.
 zig_lib="$root/zig/zig-out/lib/liblo_runtime.a"
 if [[ -f "$zig_lib" ]]; then
-  cc "$obj" "$zig_lib" -o "$tmp/zig"
+  # shellcheck disable=SC2086
+  cc $nopie "$obj" "$zig_lib" -o "$tmp/zig"
   run_check "zig" "$tmp/zig"
 else
   echo "  zig: lib not built (cd zig && zig build), skipped" >&2
@@ -57,7 +78,8 @@ fi
 # C++ — link with the C++ driver so the C++ standard library comes in.
 cpp_lib="$root/cpp/build/liblo_runtime.a"
 if [[ -f "$cpp_lib" ]]; then
-  "$cxx" "$obj" "$cpp_lib" -o "$tmp/cpp"
+  # shellcheck disable=SC2086
+  "$cxx" $nopie "$obj" "$cpp_lib" -o "$tmp/cpp"
   run_check "cpp" "$tmp/cpp"
 else
   echo "  cpp: lib not built (cd cpp && cmake -B build -S . && cmake --build build), skipped" >&2
