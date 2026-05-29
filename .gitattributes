@@ -1,0 +1,3 @@
+# Vendored third-party single-header test framework — exempt from whitespace
+# checks (it ships with a trailing blank line we don't want to edit).
+cpp/tests/catch.hpp -whitespace linguist-vendored
