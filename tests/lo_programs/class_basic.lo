@@ -1,0 +1,32 @@
+// class_basic.lo — WS-1 Phase 4 placeholder fixture.
+//
+// TODO(SC): placeholder LO-3/LO-4 syntax — validate against
+// planning:lo-3-reference.md / lo-4-reference.md before the conformance harness
+// consumes it. The stable contract is the expected output in tests/expected/.
+//
+// Intent: declare one class with one method, instantiate it, invoke the method,
+// and print the result — exercising allocation, method dispatch, and output.
+
+class Box {
+    var value : int;
+
+    method get() : int {
+        return value;
+    }
+
+    method set(v : int) : int {
+        value = v;
+        return v;
+    }
+}
+
+class Main {
+    method main() : int {
+        var b : Box;
+        b = new Box();
+        b.set(7);
+        out.printInt(b.get());
+        out.println();
+        return 0;
+    }
+}
