@@ -32,6 +32,12 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
+        // Bundle Zig's compiler-rt into the archive so the library is
+        // self-contained when linked by a foreign linker (cc/ld). Without this,
+        // a non-Zig link leaves Zig runtime symbols such as `__zig_probe_stack`
+        // undefined on targets that use them (e.g. x86_64 stack probing). This is
+        // exactly how students link the runtime, so the .a must stand alone.
+        lib.bundle_compiler_rt = true;
         b.installArtifact(lib);
     }
 
