@@ -1,0 +1,22 @@
+[package]
+name = "lo_runtime"
+version = "0.1.0"
+edition = "2021"
+description = "LO runtime skeleton (Rust) — CS 378H Compilers, Fall 2026"
+publish = false
+# license: TODO(DC) — pinned to the course-materials license once chosen (see
+# repo-root LICENSE placeholder).
+
+[lib]
+# staticlib -> native AOT linkage (liblo_runtime.a)
+# cdylib    -> WASM module (lo_runtime.wasm)
+# rlib      -> lets the language-native tests + the io probe bin link the crate
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# The runtime is hand-rolled: no GC libraries, and native I/O goes through
+# std::io (see src/io.rs for why libc is not used here). No runtime deps.
+[dependencies]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
