@@ -1,0 +1,9 @@
+TODO(DC): pick license
+
+The course-materials license for the LO runtime skeletons has not yet been
+fixed in this repo. The WS-1 runbook (runbooks/ws1-build-skeletons.md, step 0.1)
+directs CC to copy whatever DC has chosen for course materials — likely the same
+license as the planning repo. As of Phase 0 the planning repo had not committed a
+LICENSE either, so this placeholder stands until DC resolves it.
+
+Replace this file with the chosen license text.

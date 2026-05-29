@@ -1,0 +1,18 @@
+# Rust
+/rust/target/
+**/*.rs.bk
+
+# Zig
+/zig/.zig-cache/
+/zig/zig-cache/
+/zig/zig-out/
+
+# C++
+/cpp/build/
+*.o
+*.a
+compile_commands.json
+
+# Platform noise
+.DS_Store
+Thumbs.db
