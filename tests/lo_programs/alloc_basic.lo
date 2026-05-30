@@ -1,12 +1,18 @@
-// alloc_basic.lo — WS-1 smoke fixture. Grammar-corrected to LO-3 by SC, 2026-05-29.
-// Expected stdout: "42" + newline (tests/expected/alloc_basic.out). main() returns 0.
-// Exercises: object allocation (the Main instance) and the integer output path.
+// alloc_basic.lo — WS-1 Phase 4 placeholder fixture.
+//
+// TODO(SC): the LO-3 surface syntax below is a best-effort placeholder. CC does
+// not have the LO-3 grammar (planning:lo-3-reference.md) in this repo; validate
+// and correct the syntax before the conformance harness consumes these. The
+// stable contract for now is the expected output in tests/expected/.
+//
+// Intent: allocate a simple object and print a known integer, exercising the
+// allocator and integer output paths.
 
-class Main ( ) {
-    int main() {
-        int n;
+class Main {
+    method main() : int {
+        var n : int;
         n = 42;
-        out.print_int(n);
+        out.printInt(n);
         out.println();
         return 0;
     }
