@@ -13,8 +13,8 @@
 The runbook is complete when all of the following hold:
 
 - Each of `rust/`, `zig/`, `cpp/` contains a working language-native build (Cargo / `build.zig` / CMake) that produces a static library (native) and a WASM module.
-- Each skeleton implements every "Provided (working out of the box)" entry point per `runtime-abi.md` §4.4 — type definitions, special class descriptors plus `LO_EMPTY_STRING`, `lo_runtime_init` / `lo_runtime_shutdown`, all `lo_print_*` and `lo_read_*` and `lo_println` and `lo_eof`, `lo_push_frame` and `lo_pop_frame`, a bump allocator backing `lo_alloc`, and `lo_gc_write_barrier` as a bare-store no-op.
-- Each skeleton stubs every "Stubbed (team implements)" entry point with the correct C-ABI signature and an idiomatic-form body that aborts with a clear "not implemented" message when called — `unimplemented!()` for Rust, `@panic("not implemented")` for Zig, `throw std::runtime_error("not implemented")` for C++.
+- Each skeleton implements every "Provided (working out of the box)" entry point per `runtime-abi.md` §4.4 — type definitions, special class descriptors plus `LO_EMPTY_STRING`, `lo_runtime_init` / `lo_runtime_shutdown`, all `lo_print_*` and `lo_read_*` and `lo_println` and `lo_eof`, `lo_push_frame` and `lo_pop_frame`, a bump allocator backing `lo_alloc`, `lo_gc_write_barrier` as a bare-store no-op, and `lo_abort_null_receiver` (the provided null-receiver abort helper, §3.8 — exit 102 on native, trap on WASM).
+- Each skeleton stubs every "Stubbed (team implements)" entry point with the correct C-ABI signature and an idiomatic-form body that aborts with a clear "not implemented" message when called — `unimplemented!()` for Rust, `@panic("not implemented")` for Zig, `throw std::runtime_error("not implemented")` for C++. The resulting trap/abort *shape* is language-native and deliberately **not** unified across skeletons: a stub only ever fires during skeleton development (a team replaces each stub before its feature is exercised), so it is not part of the conformance contract. The contract is the observable behavior and abort exit codes of the *provided* entry points (§4.4), not how an unimplemented stub fails. Revisit only if a future conformance harness needs to distinguish "stub not implemented" from a real runtime abort.
 - Each skeleton has language-native unit tests under `<lang>/tests/` (or `<lang>/src/tests/` per language convention) that exercise the provided entry points directly via the C ABI. Tests cover: allocation returns zero-initialized memory; shadow-stack push/pop maintains the linked list correctly; print and read entry points round-trip; `LO_EMPTY_STRING` is a valid zero-length `StringObject` after `lo_runtime_init`.
 - The shared `tests/lo_programs/` directory contains the LO program test fixtures (documented but not auto-runnable until a student's compiler exists). At least three placeholder LO programs covering basic allocation, basic string, and basic class scenarios are present, each with an `expected.out`.
 - Pre-commit hooks are installed and pass cleanly across all three skeletons.
@@ -68,7 +68,7 @@ command -v gitleaks >/dev/null && gitleaks detect --source . --no-banner
 1.1 — **Cargo project.** Create `rust/Cargo.toml` and `rust/src/lib.rs`. Cargo.toml structure:
 - `[package]` — name `lo_runtime`, version `0.1.0`, edition `2021`.
 - `[lib]` — crate-type `["staticlib", "cdylib", "rlib"]`. The staticlib targets native linking; the cdylib targets WASM; the rlib lets the language-native tests link the library.
-- `[dependencies]` — minimal. `libc = "0.2"` for the I/O functions on native. No GC libraries; the skeleton is hand-rolled.
+- `[dependencies]` — minimal, ideally empty. Native I/O uses `std::io`, not `libc` (see step 1.8 and `runtime-abi.md` §3.7), so no `libc` dependency is needed for I/O; add one only if a specific entry point genuinely requires a libc symbol. No GC libraries; the skeleton is hand-rolled.
 - `[profile.release]` — `lto = "thin"`, `codegen-units = 1`. The runtime is small and statically linked; LTO matters.
 
 1.2 — **Module structure.** `rust/src/lib.rs` declares the modules and re-exports the public C-ABI surface. Modules:
@@ -87,11 +87,11 @@ command -v gitleaks >/dev/null && gitleaks detect --source . --no-banner
 1.3 — **Type definitions** (`object.rs`). All types match `runtime-abi.md` §2 byte-for-byte on 64-bit. Use `#[repr(C)]` on every struct and `#[repr(transparent)]` where applicable. Layout assumptions:
 - `Object`: `class_descriptor: *const ClassDescriptor` (pointer-sized) + `gc_bits: u32` + `flags: u32`. Total 16 bytes on 64-bit.
 - `ClassDescriptor`: per `runtime-abi.md` §2.1, all fields in declared order.
-- `ShadowFrame`: per §3.3 — `parent`, `num_roots`, then a flexible-tail `roots` array. In Rust, the flexible-tail is awkward; emit as `roots: *mut *mut Object` plus a constructor pattern that takes a slice. Document the layout convention in module docs.
-- `StringObject`: header + length + inline tail. Use `#[repr(C)]` with a fixed `data: [u8; 0]` zero-size tail and document that the allocation includes additional space; readers index off the struct's base + `mem::size_of::<StringObject>()`.
+- `ShadowFrame`: per §3.3 — header `{ parent, num_roots }` followed by an **inline** `roots` array laid out immediately after the header (`roots: [*mut Object; N]` conceptually), *not* a pointer field. This matches the frames codegen stack-allocates; a pointer-field representation would make a team's GC scan the wrong memory. In Rust the flexible tail is awkward: emit the header struct with a zero-size `roots: [*mut Object; 0]` marker and have callers/GC index off `base + offset_of!(ShadowFrame, roots)` (see the offset-of convention below). Document the inline-array layout in module docs.
+- `StringObject`: header + `length` + inline `data` tail. Use `#[repr(C)]` with a fixed `data: [u8; 0]` zero-size tail and document that the allocation includes additional space. **Readers index the inline bytes off `base + offset_of!(StringObject, data)`, not `base + size_of::<StringObject>()`** — `size_of` includes trailing alignment padding (24 on 64-bit) and points *past* where the inline bytes actually start (offset 20 on 64-bit). This offset-of-not-size-of rule applies to every flexible-tail type (`StringObject`, `ShadowFrame`); the C harness and all three skeletons encode it, and `runtime-abi.md` §3.2/§3.3 state it explicitly.
 
 1.4 — **Static class descriptors and empty-string singleton** (`descriptors.rs`).
-- `LO_STRING_CLASS`, `LO_INT_BOX_CLASS`, `LO_BOOL_BOX_CLASS`: each a `static ClassDescriptor` with `name` pointing at a `b"String\0"`-style byte string in `.rodata`, `parent` null, `vtable` empty (a static empty array), `pointer_offsets` empty. `instance_size` is `mem::size_of::<StringObject>()` for the String class, `mem::size_of::<Object>() + 4` (header + boxed int slot) for the int box, similarly for bool box.
+- `LO_STRING_CLASS`, `LO_INT_BOX_CLASS`, `LO_BOOL_BOX_CLASS`: each a `static ClassDescriptor` with `name` pointing at a `b"String\0"`-style byte string in `.rodata`, `parent` null, `vtable` empty (a static empty array), `pointer_offsets` empty. `instance_size` is `offset_of!(StringObject, data)` (the base before the inline tail, = 20 on 64-bit) for the String class — string allocations add `length` bytes to this base — and `mem::size_of::<Object>() + 4` (header + boxed int slot) for the int box, similarly for bool box. (Use `offset_of`, not `size_of`, for the String base — see step 1.3.)
 - `LO_EMPTY_STRING`: `static mut LO_EMPTY_STRING: *mut Object = ptr::null_mut();` — initialized in `lo_runtime_init` via a bump-alloc of a zero-length `StringObject`. Marked `unsafe` for access; provide a safe getter behind `OnceLock` or equivalent if the pattern fits idiomatic modern Rust.
 
 1.5 — **Allocation** (`alloc.rs`).
@@ -109,14 +109,15 @@ command -v gitleaks >/dev/null && gitleaks detect --source . --no-banner
 1.7 — **Runtime initialization** (`init.rs`).
 - `lo_runtime_init()`: allocate the heap region; initialize `BUMP_PTR = HEAP_START`; bump-allocate a zero-length `StringObject` for `LO_EMPTY_STRING` (class pointer set to `&LO_STRING_CLASS`, length 0); `CURRENT_FRAME = null`.
 - `lo_runtime_shutdown()`: drop the heap (Vec drop suffices on native; no-op on WASM). The function exists for symmetry; not required to be called.
+- `lo_abort_null_receiver()` (provided, per `runtime-abi.md` §3.8 and §4.4): print the null-receiver abort message to stderr and terminate — exit code 102 on native, `unreachable`/trap on WASM. This is a *provided* helper (codegen calls it on a null receiver before dispatch), not a stub; implement it, don't `unimplemented!()` it. Phases 2 (Zig) and 3 (C++) mirror this; the message text matches §3.8 verbatim across all three.
 
 1.8 — **I/O** (`io.rs`). All four print functions and all four read functions, plus `lo_println` and `lo_eof`.
-- On native (`cfg(not(target_arch = "wasm32"))`), use `libc::printf` / `libc::scanf` / `libc::fgets` / `libc::feof`. Wire the StringObject layout — for `lo_print_string`, read `length` and pass `data` to `printf("%.*s", length, data)`.
+- On native (`cfg(not(target_arch = "wasm32"))`), use Rust `std::io` (a locked `stdout`/`stdin` handle), **not** raw `libc`. For `lo_print_string`, read `length` and the inline bytes (off `offset_of!(StringObject, data)`) and write them. Rationale and the offset-of rule are in `runtime-abi.md` §3.7 / §2.2.
 - On WASM (`cfg(target_arch = "wasm32")`), declare imported host functions: `extern "C" { fn host_print_int(n: i32); fn host_read_int() -> i32; ... }` and forward to them. The host test harness wires the imports.
-- `lo_read_string` on native: read up to next newline with `fgets`, allocate a new `StringObject` via `lo_alloc(&LO_STRING_CLASS)` plus codepoint-aware sizing, copy bytes, return.
-- `lo_read_int`: skip leading whitespace, parse an integer with `strtol` semantics; abort on EOF or parse failure.
-- `lo_read_bool`: read a whitespace-delimited token; accept `"true"` or `"false"`; abort otherwise.
-- `lo_eof`: native uses `feof(stdin)`; WASM forwards to host.
+- `lo_read_string` on native: read up to the next newline from a buffered `stdin`, allocate a new `StringObject` via `lo_alloc(&LO_STRING_CLASS)` plus codepoint-aware sizing, copy bytes, return.
+- `lo_read_int`: skip leading whitespace, parse an integer; abort on EOF or parse failure (status 111 / 110 per §3.7).
+- `lo_read_bool`: read a whitespace-delimited token; accept `"true"` or `"false"`; abort (112) otherwise.
+- `lo_eof`: must report end-of-input **without consuming** bytes — implement via a buffered reader's `fill_buf`/peek, **not** `feof` (which only reports EOF *after* a consumed read attempt and so does not satisfy the §3.7 semantics); WASM forwards to host.
 
 1.9 — **Write barrier** (in `gc.rs`).
 - `lo_gc_write_barrier(obj, offset, value)`: bare store, equivalent to `*((obj as *mut u8).add(offset) as *mut *mut Object) = value;`. Document at top of function that this is the non-generational implementation per `runtime-abi.md` §3.4; teams using a generational GC replace the body.
@@ -167,7 +168,7 @@ All five must succeed.
 
 2.5 — **Allocation.** Same bump-allocator logic as Rust, using Zig's `[]u8` slice and pointer arithmetic. Heap region allocated via `std.heap.page_allocator` at `lo_runtime_init`.
 
-2.6 through 2.11 — **Remaining steps parallel Phase 1.** Stub style: `@panic("not implemented")`. I/O on native uses `std.c` for libc bindings; on WASM uses `extern "host" fn host_print_int(...)` declarations.
+2.6 through 2.11 — **Remaining steps parallel Phase 1.** Stub style: `@panic("not implemented")`. I/O on native uses `std.io` (a buffered `stdin` reader so `lo_eof` can peek without consuming, per §3.7), **not** `std.c`/libc; on WASM uses `extern "host" fn host_print_int(...)` declarations.
 
 2.12 — **Language-native unit tests.** Zig's built-in test infrastructure (`test "init shutdown clean" { ... }`). Tests run via `zig build test`.
 
@@ -245,11 +246,17 @@ If any skeleton's layout differs, fix it; the ABI must be byte-identical across 
 
 **Verification.**
 ```
-# In each skeleton, build the static library, then:
-cc tests/c_harness/main.c -L<lang>/target -llo_runtime -o /tmp/lo_test_<lang>
+# In each skeleton, build the static library, then link the C harness against it.
+# Rust and Zig link with a C driver:
+cc  tests/c_harness/main.c -L<lang>/target -llo_runtime -o /tmp/lo_test_<lang>
+# The C++ skeleton must link with the C++ driver (c++ / $CXX) so the C++ standard
+# library is pulled in — a plain `cc` link fails to resolve libstdc++/libc++ symbols:
+c++ tests/c_harness/main.c -Lcpp/build -llo_runtime -o /tmp/lo_test_cpp
 /tmp/lo_test_<lang>
 ```
-For each skeleton, the harness should produce identical output to the others.
+`tests/c_harness/run.sh` is authoritative — it selects the right driver and the
+per-skeleton native libs for you (Rust's reported `native-static-libs`, the C++
+driver for the C++ lib); prefer running it over the snippet above.
 
 **Notes-to-self.** Drop `runbooks/notes/cc-phase4-notes.md`. Note any layout drift you had to fix between skeletons; any conventions in the test corpus that DC may want to adjust.
 
