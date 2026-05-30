@@ -1,16 +1,12 @@
-// string_basic.lo — WS-1 Phase 4 placeholder fixture.
-//
-// TODO(SC): placeholder LO-3 syntax — validate against planning:lo-3-reference.md
-// before the conformance harness consumes it. The stable contract is the
-// expected output in tests/expected/.
-//
-// Intent: print a known string literal, exercising String output.
+// string_basic.lo — WS-1 smoke fixture. Grammar-corrected to LO-3 by SC, 2026-05-29.
+// Expected stdout: "hello" + newline (tests/expected/string_basic.out). main() returns 0.
+// Exercises: String literal assignment and the String output path.
 
-class Main {
-    method main() : int {
-        var s : String;
+class Main ( ) {
+    int main() {
+        String s;
         s = "hello";
-        out.printString(s);
+        out.print_string(s);
         out.println();
         return 0;
     }
