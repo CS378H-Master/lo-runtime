@@ -87,14 +87,16 @@ fn shadow_stack_push_pop() {
 }
 
 #[test]
-fn empty_string_singleton() {
-    with_runtime(|| unsafe {
-        let s = LO_EMPTY_STRING;
-        assert!(!s.is_null(), "LO_EMPTY_STRING null after init");
-        assert_eq!((*s).class_descriptor, &LO_STRING_CLASS as *const _);
-        let so = s as *const StringObject;
-        assert_eq!((*so).length, 0);
-    });
+fn empty_string_is_rodata_static() {
+    // LO_EMPTY_STRING is now a `.rodata` static *object* (decision (A), ABI §2.3),
+    // not an init-time heap allocation: the symbol denotes the object itself, so
+    // it is a valid length-0 String independent of any init/shutdown cycle.
+    let so: &StringObject = &LO_EMPTY_STRING;
+    assert_eq!(
+        so.header.class_descriptor, &LO_STRING_CLASS as *const _,
+        "LO_EMPTY_STRING must be backed by LO_STRING_CLASS"
+    );
+    assert_eq!(so.length, 0, "LO_EMPTY_STRING must be length 0");
 }
 
 #[test]

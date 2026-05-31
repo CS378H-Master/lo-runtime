@@ -1,7 +1,5 @@
 #include "lo_runtime/descriptors.h"
 
-#include "lo_runtime/alloc.h"
-
 extern "C" {
 
 const ClassDescriptor LO_STRING_CLASS = {
@@ -37,14 +35,12 @@ const ClassDescriptor LO_BOOL_BOX_CLASS = {
     .vtable = nullptr,
 };
 
-Object *LO_EMPTY_STRING = nullptr;
+// Read-only `.rodata` static object (decision (A), ABI §2.3): the symbol denotes
+// the length-0 String itself. A zero-length string has no inline tail, so the
+// whole object is a fixed compile-time constant outside the managed heap.
+const StringObject LO_EMPTY_STRING = {
+    .header = {.class_descriptor = &LO_STRING_CLASS, .gc_bits = 0, .flags = 0},
+    .length = 0,
+};
 
 } // extern "C"
-
-namespace lo {
-
-void init_empty_string() { LO_EMPTY_STRING = bump_alloc_string(0); }
-
-void clear_empty_string() { LO_EMPTY_STRING = nullptr; }
-
-} // namespace lo

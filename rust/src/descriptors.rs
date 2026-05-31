@@ -45,33 +45,38 @@ pub static LO_BOOL_BOX_CLASS: ClassDescriptor = ClassDescriptor {
     vtable: core::ptr::null(),
 };
 
-/// The canonical length-0 `StringObject`, allocated once by `lo_runtime_init`
-/// and never collected. Codegen treats it as a read-only static pointer used to
-/// initialize String-typed fields to their LO default (the empty string).
+/// The canonical length-0 `StringObject` (`runtime-abi.md` §2.3, runbook WS-2
+/// §2.5). Defined as a **read-only static object in `.rodata`** — not
+/// heap-allocated — so its address is a link-time constant that lies outside both
+/// semispaces by construction. The symbol denotes the object itself; codegen
+/// references its address directly (no load) to initialize String-typed fields to
+/// their LO default (the empty string).
 ///
-/// Held as a `static mut` raw pointer per the runbook's allowance for the few
-/// genuinely-global mutable slots. It is written exactly once (during init) and
-/// thereafter only read; the single-threaded runtime makes that sound. Access is
-/// always by value (never by reference), which keeps it clear of the
-/// `static_mut_refs` lint.
+/// This replaces the WS-1 init-time allocation: `lo_runtime_init` no longer
+/// allocates the empty string. Because it is never *in* from-space, the
+/// collector's `forward` range-check returns it untouched with no special case
+/// (runbook WS-2 §2.5), and being read-only storage, a buggy collector that
+/// forgot to range-guard before writing its header would fault loudly rather than
+/// corrupt a shared object.
+///
+/// A zero-length string has no inline tail, so the whole object is a fixed
+/// compile-time constant. `StringObject` carries a raw pointer (in its `Object`
+/// header), so it is not `Sync` by default — but this instance is immutable
+/// read-only data on the single runtime thread, so the `unsafe impl Sync` below
+/// is sound, exactly as for the class descriptors above.
 #[no_mangle]
-pub static mut LO_EMPTY_STRING: *mut Object = core::ptr::null_mut();
+pub static LO_EMPTY_STRING: StringObject = StringObject {
+    header: Object {
+        class_descriptor: &LO_STRING_CLASS as *const ClassDescriptor,
+        gc_bits: 0,
+        flags: 0,
+    },
+    length: 0,
+    data: [],
+};
 
-/// Allocate the [`LO_EMPTY_STRING`] singleton. Called once from `lo_runtime_init`
-/// after the heap is up.
-pub(crate) fn init_empty_string() {
-    // SAFETY: called once during init, after `heap_init`, on the single runtime
-    // thread. `bump_alloc_string(0)` returns a valid zero-length StringObject
-    // backed by LO_STRING_CLASS.
-    unsafe {
-        LO_EMPTY_STRING = crate::alloc::bump_alloc_string(0);
-    }
-}
-
-/// Reset the singleton pointer (called from `lo_runtime_shutdown` for symmetry).
-pub(crate) fn clear_empty_string() {
-    // SAFETY: single-threaded; by-value write of a raw pointer.
-    unsafe {
-        LO_EMPTY_STRING = core::ptr::null_mut();
-    }
-}
+// SAFETY: `StringObject` carries a raw pointer in its header (so it is not `Sync`
+// by default), but `LO_EMPTY_STRING` is immutable read-only data, generated once
+// and never mutated, and the runtime is single-threaded (`runtime-abi.md` §1). It
+// is therefore sound to place it in a `static`, which requires `Sync`.
+unsafe impl Sync for StringObject {}

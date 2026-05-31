@@ -2,7 +2,6 @@
 //! descriptors and the canonical empty-string singleton, referenced by codegen.
 
 const object = @import("object.zig");
-const alloc = @import("alloc.zig");
 const ClassDescriptor = object.ClassDescriptor;
 const Object = object.Object;
 const StringObject = object.StringObject;
@@ -43,18 +42,19 @@ pub export const LO_BOOL_BOX_CLASS: ClassDescriptor = .{
     .vtable = null,
 };
 
-/// The canonical length-0 `StringObject`, allocated once by `lo_runtime_init` and
-/// never collected. Codegen treats it as a read-only static pointer used to
-/// initialize String-typed fields to the empty-string default.
-pub export var LO_EMPTY_STRING: ?*Object = null;
-
-/// Allocate the `LO_EMPTY_STRING` singleton. Called once from `lo_runtime_init`
-/// after the heap is up.
-pub fn initEmptyString() void {
-    LO_EMPTY_STRING = alloc.bumpAllocString(0);
-}
-
-/// Clear the singleton pointer (called from `lo_runtime_shutdown` for symmetry).
-pub fn clearEmptyString() void {
-    LO_EMPTY_STRING = null;
-}
+/// The canonical length-0 `StringObject` (`runtime-abi.md` §2.3, runbook WS-2
+/// §2.5). Defined as a **read-only static object** (`export const` → `.rodata`),
+/// not heap-allocated: the symbol denotes the object itself, its address is a
+/// link-time constant outside the managed heap, and codegen references it
+/// directly (no load). This replaces the WS-1 init-time allocation — the
+/// collector never moves or reclaims it (it is never *in* from-space), so no
+/// special case is needed in `forward`.
+pub export const LO_EMPTY_STRING: StringObject = .{
+    .header = .{
+        .class_descriptor = &LO_STRING_CLASS,
+        .gc_bits = 0,
+        .flags = 0,
+    },
+    .length = 0,
+    .data = .{},
+};
