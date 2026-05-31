@@ -73,7 +73,7 @@ The runtime exports the following as `extern` statics that codegen references:
 - `LO_STRING_CLASS` — the descriptor for `String`.
 - `LO_INT_BOX_CLASS` — boxed `int`. Used only when an LO-5 feature (e.g., type-erased generics) requires uniform pointer-typed values.
 - `LO_BOOL_BOX_CLASS` — boxed `bool`. Same caveat.
-- `LO_EMPTY_STRING` — a pre-allocated canonical `StringObject` of length 0 (`length == 0`, no inline bytes). Used by codegen to initialize String-typed fields to their LO-language default (the empty string). The runtime allocates this instance once during `lo_runtime_init` and never collects it; codegen treats it as a read-only static pointer.
+- `LO_EMPTY_STRING` — a canonical `StringObject` of length 0 (`length == 0`, no inline bytes), defined as a read-only static object in `.rodata`. Used by codegen to initialize String-typed fields to their LO-language default (the empty string). The symbol denotes the object itself; its address is a link-time constant that codegen references directly (no load). Because it is a fixed static outside the managed heap, the runtime neither allocates nor collects it, and a moving collector must never relocate it — the general rule that a collector does not move, reclaim, or mutate any object outside its collectable heap covers this with no special case.
 
 The first three are class descriptors (read by the runtime for scanning, dispatch, and type checks). `LO_EMPTY_STRING` is an instance, not a descriptor — it sits alongside the descriptors because it is similarly a fixed export that codegen references by symbol.
 
@@ -187,7 +187,7 @@ extern "C" fn lo_runtime_init()
 extern "C" fn lo_runtime_shutdown()
 ```
 
-`lo_runtime_init` must be called before any other entry point. It initializes the heap, the shadow-stack root, the `LO_EMPTY_STRING` singleton, and internal state. Codegen emits a call at the top of `main` (native) or in the WASM module's `start` function.
+`lo_runtime_init` must be called before any other entry point. It initializes the heap, the shadow-stack root, and internal state. (`LO_EMPTY_STRING` is a `.rodata` static and needs no initialization — see §2.3.) Codegen emits a call at the top of `main` (native) or in the WASM module's `start` function.
 
 `lo_runtime_shutdown` is optional on native (the OS reclaims memory), useful in tests to validate no-leak invariants.
 
