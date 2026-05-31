@@ -66,8 +66,6 @@ StringObject {
 
 String data is UTF-8 bytes inline in the object. No small-string optimization in the reference design.
 
-**Inline-tail offset (offset-of, not size-of).** The inline `data` bytes begin at `offset_of(StringObject, data)` — 20 bytes on 64-bit (16-byte header + 4-byte `length`), 16 on WASM. They do **not** begin at `size_of(StringObject)`, which is 24 on 64-bit because the struct's size is rounded up to its 8-byte alignment; that trailing padding sits between `length` and where `size_of` would place the tail, so indexing the inline bytes off `size_of` reads 4 bytes past their real start. Every reader of an inline tail — here and for `ShadowFrame` (§3.3) — must use the field offset, not the struct size. Correspondingly, `LO_STRING_CLASS.instance_size` is the base `offset_of(StringObject, data)` (= 20); a string of length L occupies `offset_of(StringObject, data) + L` bytes before allocator rounding.
-
 ### 2.3 Special exports from the runtime
 
 The runtime exports the following as `extern` statics that codegen references:
@@ -75,7 +73,7 @@ The runtime exports the following as `extern` statics that codegen references:
 - `LO_STRING_CLASS` — the descriptor for `String`.
 - `LO_INT_BOX_CLASS` — boxed `int`. Used only when an LO-5 feature (e.g., type-erased generics) requires uniform pointer-typed values.
 - `LO_BOOL_BOX_CLASS` — boxed `bool`. Same caveat.
-- `LO_EMPTY_STRING` — a pre-allocated canonical `StringObject` of length 0 (`length == 0`, no inline bytes). Used by codegen to initialize String-typed fields to their LO-language default (the empty string). The runtime allocates this instance once during `lo_runtime_init` and never collects it; codegen treats it as a read-only static pointer.
+- `LO_EMPTY_STRING` — a canonical `StringObject` of length 0 (`length == 0`, no inline bytes), defined as a read-only static object in `.rodata`. Used by codegen to initialize String-typed fields to their LO-language default (the empty string). The symbol denotes the object itself; its address is a link-time constant that codegen references directly (no load). Because it is a fixed static outside the managed heap, the runtime neither allocates nor collects it, and a moving collector must never relocate it — the general rule that a collector does not move, reclaim, or mutate any object outside its collectable heap covers this with no special case.
 
 The first three are class descriptors (read by the runtime for scanning, dispatch, and type checks). `LO_EMPTY_STRING` is an instance, not a descriptor — it sits alongside the descriptors because it is similarly a fixed export that codegen references by symbol.
 
@@ -145,8 +143,6 @@ lo_pop_frame();
 
 At each safepoint (just before any call that may trigger GC — which includes all `lo_*` calls), codegen updates `frame.roots[i]` for each live pointer-typed local. The runtime maintains a thread-local `current_frame` pointer; `lo_push_frame` swaps it with the new frame's parent slot, and `lo_pop_frame` restores.
 
-The `roots` array is **inline** in the frame, laid out immediately after the `{ parent, num_roots }` header — it is not a pointer to a separate buffer. A runtime (or GC) reads root `i` at `frame_base + offset_of(ShadowFrame, roots) + i * sizeof(ptr)`, using the field offset (16 bytes on 64-bit), not `size_of(ShadowFrame)` — the same offset-of-not-size-of rule as the String tail (§2.2). Representing `roots` as a pointer field instead of an inline array is non-conformant: it would not match the frame codegen stack-allocates, and a team's GC would scan the wrong memory.
-
 ### 3.4 GC operations
 
 ```
@@ -191,7 +187,7 @@ extern "C" fn lo_runtime_init()
 extern "C" fn lo_runtime_shutdown()
 ```
 
-`lo_runtime_init` must be called before any other entry point. It initializes the heap, the shadow-stack root, the `LO_EMPTY_STRING` singleton, and internal state. Codegen emits a call at the top of `main` (native) or in the WASM module's `start` function.
+`lo_runtime_init` must be called before any other entry point. It initializes the heap, the shadow-stack root, and internal state. (`LO_EMPTY_STRING` is a `.rodata` static and needs no initialization — see §2.3.) Codegen emits a call at the top of `main` (native) or in the WASM module's `start` function.
 
 `lo_runtime_shutdown` is optional on native (the OS reclaims memory), useful in tests to validate no-leak invariants.
 
@@ -215,7 +211,7 @@ extern "C" fn lo_read_string() -> *mut Object
 extern "C" fn lo_eof() -> bool
 ```
 
-The native I/O backend is **implementation-defined per skeleton** — the reference skeletons use each language's standard library (Rust `std::io`, Zig `std.io`, C++ `<cstdio>`) rather than raw libc. What the ABI fixes is the *observable* behavior: the bytes written, the parse/abort rules below, the abort exit codes, and especially the `lo_eof` semantics. The libc `feof` family is specifically **not** a conformant basis for `lo_eof`: `feof` reports true only *after* a read has already attempted and hit end-of-input, whereas `lo_eof` must report true when the stream is *at* end-of-input *without consuming* any bytes (a look-ahead/peek). A conformant `lo_eof` therefore needs a peek-one-byte-and-push-back (or buffered-reader `fill_buf`) implementation, which the language standard libraries express cleanly and bare libc `stdin` globals do not portably. On WASM, the functions import host functions provided by the test harness — typically `print_int`, `read_int`, etc., resolved at module instantiation; the harness wires the read functions to whatever input source it uses.
+On native, these wrap libc `printf` / `puts` for output and `scanf` / `fgets` for input. On WASM, they import host functions provided by the test harness — typically `print_int`, `read_int`, etc., resolved at module instantiation; the harness wires the read functions to whatever input source it uses.
 
 Read semantics:
 
