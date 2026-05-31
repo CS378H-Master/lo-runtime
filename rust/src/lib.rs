@@ -59,6 +59,8 @@ pub use string_ops::{
     lo_string_compare, lo_string_concat, lo_string_new, lo_string_repeat, lo_string_reverse,
 };
 
-// Debug/test hook (not part of the ABI).
+// Debug/test hooks (not part of the ABI).
+#[doc(hidden)]
+pub use alloc::heap_used;
 #[doc(hidden)]
 pub use shadow_stack::current_frame;
