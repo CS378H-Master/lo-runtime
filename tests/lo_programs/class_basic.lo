@@ -1,31 +1,35 @@
-// class_basic.lo — WS-1 Phase 4 placeholder fixture.
+// class_basic.lo — shared smoke fixture.
 //
-// TODO(SC): placeholder LO-3/LO-4 syntax — validate against
-// planning:lo-3-reference.md / lo-4-reference.md before the conformance harness
-// consumes it. The stable contract is the expected output in tests/expected/.
+// Surface syntax validated against planning:lo-3-reference.md (three-section
+// class decl: fields in `( )`, constructors in `[ ]`, methods in `{ }`).
+// Stable contract: expected/class_basic.out (`7`).
 //
-// Intent: declare one class with one method, instantiate it, invoke the method,
-// and print the result — exercising allocation, method dispatch, and output.
+// Intent: declare one class with methods, instantiate it, mutate and read via
+// dispatch, and print the result — exercising allocation, method dispatch, and
+// output. `Box` declares an explicit zero-arg constructor so `new Box()` is
+// well-formed (a bare field section would give only a one-arg implicit
+// constructor, making `new Box()` an arity error).
 
-class Box {
-    var value : int;
-
-    method get() : int {
+class Box ( int value; ) [
+    Box() {
+        value = 0;
+    }
+] {
+    int get() {
         return value;
     }
 
-    method set(v : int) : int {
+    void set(int v) {
         value = v;
-        return v;
     }
 }
 
-class Main {
-    method main() : int {
-        var b : Box;
+class Main ( ) {
+    int main() {
+        Box b;
         b = new Box();
         b.set(7);
-        out.printInt(b.get());
+        out.print_int(b.get());
         out.println();
         return 0;
     }

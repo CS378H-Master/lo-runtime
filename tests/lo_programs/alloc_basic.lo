@@ -1,18 +1,17 @@
-// alloc_basic.lo — WS-1 Phase 4 placeholder fixture.
+// alloc_basic.lo — shared smoke fixture.
 //
-// TODO(SC): the LO-3 surface syntax below is a best-effort placeholder. CC does
-// not have the LO-3 grammar (planning:lo-3-reference.md) in this repo; validate
-// and correct the syntax before the conformance harness consumes these. The
-// stable contract for now is the expected output in tests/expected/.
+// Surface syntax validated against planning:lo-3-reference.md (redesigned LO-3:
+// three-section class decl; `int Main.main()` entry; pre-bound `out`; snake_case
+// IO methods). Stable contract: expected/alloc_basic.out (`42`).
 //
-// Intent: allocate a simple object and print a known integer, exercising the
-// allocator and integer output paths.
+// Intent: exercise the allocator (the entry wrapper allocates `new Main()` via
+// lo_alloc) and the integer-output path.
 
-class Main {
-    method main() : int {
-        var n : int;
+class Main ( ) {
+    int main() {
+        int n;
         n = 42;
-        out.printInt(n);
+        out.print_int(n);
         out.println();
         return 0;
     }
