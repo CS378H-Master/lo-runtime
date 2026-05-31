@@ -25,14 +25,14 @@ The eventual harness will, for each `lo_programs/<name>.lo`: compile it with the
 team's LO compiler, link against the chosen skeleton's runtime, run it, and
 compare stdout to `expected/<name>.out`.
 
-> **TODO(SC):** the LO-3/LO-4 *surface syntax* in these `.lo` files is a
-> best-effort placeholder — CC does not have the LO-3 grammar
-> (`planning:lo-3-reference.md`) in this repo. Validate and correct the syntax
-> before wiring a conformance harness. The **expected outputs are the stable
-> contract**; the `.lo` bodies will be rewritten to grammar-correct LO. The full
-> conformance suite (a dozen-plus programs) is maintained separately in the
-> `lo-testing` repo; this directory is the skeleton's small smoke set and may
-> later mirror or merge with it (downstream decision).
+> **Note:** the `.lo` surface syntax in these fixtures is validated against the
+> redesigned LO-3 grammar (`planning:lo-3-reference.md`) — three-section class
+> declarations, `int Main.main()` entry, the pre-bound `out` sink, and
+> snake_case IO methods (`print_int` / `print_string` / `println`). The
+> **expected outputs remain the stable contract**. The full conformance suite (a
+> dozen-plus programs) is maintained separately in the `lo-testing` repo; this
+> directory is the skeleton's small smoke set and may later mirror or merge with
+> it (downstream decision).
 
 ## C harness — the live ABI check
 
