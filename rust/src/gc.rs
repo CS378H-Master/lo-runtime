@@ -295,6 +295,13 @@ mod tests {
             assert_eq!(after, 24, "only the live node survives");
             assert!(after < before);
 
+            // The survivor's root was rewritten to its moved location and is
+            // still a valid Node. (Also makes the root store observably-live to
+            // the compiler, which cannot see the collector read it via the
+            // registered shadow-stack pointer.)
+            let live2 = frame.roots[0];
+            assert_eq!((*live2).class_descriptor, &NODE_CLASS as *const _);
+
             lo_pop_frame();
         });
     }
