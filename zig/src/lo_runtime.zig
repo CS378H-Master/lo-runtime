@@ -112,12 +112,10 @@ test "shadow stack push/pop maintains the list" {
     try std.testing.expect(shadow_stack.currentFrame() == null);
 }
 
-test "LO_EMPTY_STRING is a valid empty string after init" {
-    init.lo_runtime_init();
-    defer init.lo_runtime_shutdown();
-
-    const s = descriptors.LO_EMPTY_STRING.?;
-    try std.testing.expectEqual(&descriptors.LO_STRING_CLASS, s.class_descriptor.?);
-    const so: *const StringObject = @ptrCast(@alignCast(s));
+test "LO_EMPTY_STRING is a .rodata static empty string" {
+    // .rodata static *object* (decision (A), ABI §2.3): the symbol denotes the
+    // object itself, valid independent of any init/shutdown cycle.
+    const so: *const StringObject = &descriptors.LO_EMPTY_STRING;
+    try std.testing.expectEqual(&descriptors.LO_STRING_CLASS, so.header.class_descriptor.?);
     try std.testing.expectEqual(@as(u32, 0), so.length);
 }

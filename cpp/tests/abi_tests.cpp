@@ -80,13 +80,9 @@ TEST_CASE("shadow stack push/pop maintains the list") {
   lo_runtime_shutdown();
 }
 
-TEST_CASE("LO_EMPTY_STRING is a valid empty string after init") {
-  lo_runtime_init();
-
-  REQUIRE(LO_EMPTY_STRING != nullptr);
-  REQUIRE(LO_EMPTY_STRING->class_descriptor == &LO_STRING_CLASS);
-  auto *so = reinterpret_cast<StringObject *>(LO_EMPTY_STRING);
-  REQUIRE(so->length == 0);
-
-  lo_runtime_shutdown();
+TEST_CASE("LO_EMPTY_STRING is a .rodata static empty string") {
+  // .rodata static *object* (decision (A), ABI §2.3): the symbol denotes the
+  // object itself, valid independent of any init/shutdown cycle.
+  REQUIRE(LO_EMPTY_STRING.header.class_descriptor == &LO_STRING_CLASS);
+  REQUIRE(LO_EMPTY_STRING.length == 0);
 }

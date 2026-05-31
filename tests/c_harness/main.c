@@ -55,10 +55,13 @@ extern void lo_print_int(int32_t n);
 extern void lo_print_string(Object *s);
 extern void lo_println(void);
 
-/* Exported statics codegen references by symbol. */
+/* Exported statics codegen references by symbol. LO_EMPTY_STRING is a `.rodata`
+ * static *object* (runtime-abi.md §2.3): the symbol denotes the object itself,
+ * not a pointer variable, so it is declared as a StringObject and referenced by
+ * address. */
 extern const ClassDescriptor LO_INT_BOX_CLASS;
 extern const ClassDescriptor LO_STRING_CLASS;
-extern Object *LO_EMPTY_STRING;
+extern const StringObject LO_EMPTY_STRING;
 
 int main(void) {
   lo_runtime_init();
@@ -70,9 +73,10 @@ int main(void) {
     return 2;
   }
 
-  /* The empty-string singleton must be a valid length-0 String after init. */
-  if (LO_EMPTY_STRING == NULL ||
-      LO_EMPTY_STRING->class_descriptor != &LO_STRING_CLASS) {
+  /* The empty-string static must be a valid length-0 String (no init needed —
+   * it is a `.rodata` constant). */
+  if (LO_EMPTY_STRING.header.class_descriptor != &LO_STRING_CLASS ||
+      LO_EMPTY_STRING.length != 0) {
     return 3;
   }
 

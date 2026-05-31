@@ -90,7 +90,8 @@ pub export fn lo_alloc(class: *const ClassDescriptor) *Object {
 /// Allocate a `StringObject` with room for `len` inline bytes, header stamped to
 /// `LO_STRING_CLASS` and `length` set; the caller fills the (zeroed) data bytes.
 /// Internal variable-size string allocator used by the provided `lo_read_string`
-/// and `LO_EMPTY_STRING` init; `lo_alloc` can't size a string itself.
+/// and the team-implemented `lo_string_*` ops; `lo_alloc` can't size a string
+/// itself.
 pub fn bumpAllocString(len: u32) *Object {
     const size = alignUp(object.stringDataOffset() + len, 8);
     const o = allocRaw(size, &descriptors.LO_STRING_CLASS);

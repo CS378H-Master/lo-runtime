@@ -8,11 +8,10 @@ extern "C" {
 extern const ClassDescriptor LO_STRING_CLASS;
 extern const ClassDescriptor LO_INT_BOX_CLASS;
 extern const ClassDescriptor LO_BOOL_BOX_CLASS;
-extern Object *LO_EMPTY_STRING;
+// The canonical length-0 String (runtime-abi.md §2.3, runbook WS-2 §2.5): a
+// read-only `.rodata` static *object*, not heap-allocated. The symbol denotes the
+// object itself; its address is a link-time constant outside the managed heap, so
+// the collector never moves or reclaims it. Replaces the WS-1 init-time
+// allocation.
+extern const StringObject LO_EMPTY_STRING;
 }
-
-namespace lo {
-// Allocate / clear the LO_EMPTY_STRING singleton (init / shutdown).
-void init_empty_string();
-void clear_empty_string();
-} // namespace lo
