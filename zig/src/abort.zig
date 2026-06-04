@@ -1,10 +1,12 @@
 //! Runtime aborts (`runtime-abi.md` §3.8). Native: message to stderr + exit with
-//! the ABI status code. WASM: a `@trap()`, which the host harness reports
-//! (distinguishing kinds by the accompanying message).
+//! the ABI status code. WASM: emit the same message via the host
+//! `host.write_stderr` import (§3.7), then `@trap()` — so the accompanying stderr
+//! is present on both targets, in the same format, for the harness to match on
+//! (delta D-B3).
 //!
-//! Each abort has a native and a WASM implementation selected at comptime, so the
-//! untaken one is never analyzed (the native bodies reference `std.process`/
-//! stderr, which freestanding WASM lacks).
+//! `runtimeAbort` (and the trapping/native split it selects) is chosen at
+//! comptime, so the untaken half is never analyzed (the native body references
+//! `std.process`/stderr, which freestanding WASM lacks).
 //!
 //! ## Why `@trap()`, not the `unreachable` keyword (WASM)
 //!
@@ -27,8 +29,14 @@ const builtin = @import("builtin");
 
 const is_wasm = builtin.cpu.arch.isWasm();
 
-/// Abort with `msg` on stderr and `code` as the exit status (native), or a trap
-/// (WASM). Never returns.
+/// Host stderr-write import (`runtime-abi.md` §3.7): `host.write_stderr(ptr, len)`
+/// writes `len` bytes of linear memory at `ptr` to the process's stderr. The WASM
+/// abort path emits the §3.8 message through it before trapping (delta D-B3).
+extern "host" fn host_write_stderr(ptr: [*]const u8, len: i32) void;
+
+/// Abort with `msg` on stderr and `code` as the exit status (native), or emit
+/// `msg` via the host stderr-write import (§3.7) and `@trap()` (WASM). Never
+/// returns.
 pub const runtimeAbort = if (is_wasm) abortWasm else abortNative;
 
 fn abortNative(msg: []const u8, code: u8) noreturn {
@@ -37,21 +45,18 @@ fn abortNative(msg: []const u8, code: u8) noreturn {
 }
 
 fn abortWasm(msg: []const u8, code: u8) noreturn {
-    _ = msg;
     _ = code;
+    // Emit the documented §3.8 message before the trap (delta D-B3) so the WASM
+    // stderr matches native; the host buffers it and prints it once.
+    host_write_stderr(msg.ptr, @intCast(msg.len));
     @trap();
 }
 
 /// Abort on a null receiver at method dispatch (`runtime-abi.md` §3.8). Codegen
 /// emits a null check before each dispatch and calls this on failure. Exit 102
-/// (native) / trap (WASM).
+/// (native) / message-then-trap (WASM). The body is target-agnostic — it only
+/// builds the message and defers to `runtimeAbort` for the target-specific exit.
 pub export fn lo_abort_null_receiver(method_name: ?[*]const u8, method_name_len: u32) noreturn {
-    nullReceiver(method_name, method_name_len);
-}
-
-const nullReceiver = if (is_wasm) nullReceiverWasm else nullReceiverNative;
-
-fn nullReceiverNative(method_name: ?[*]const u8, method_name_len: u32) noreturn {
     var buf: [256]u8 = undefined;
     const name: []const u8 = if (method_name) |p| p[0..method_name_len] else "<unknown>";
     const msg = std.fmt.bufPrint(
@@ -60,10 +65,4 @@ fn nullReceiverNative(method_name: ?[*]const u8, method_name_len: u32) noreturn 
         .{name},
     ) catch "lo_abort_null_receiver: cannot dispatch";
     runtimeAbort(msg, 102);
-}
-
-fn nullReceiverWasm(method_name: ?[*]const u8, method_name_len: u32) noreturn {
-    _ = method_name;
-    _ = method_name_len;
-    @trap();
 }

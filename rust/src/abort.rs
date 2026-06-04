@@ -1,12 +1,23 @@
 //! Runtime aborts.
 //!
 //! Native: write the message to stderr and exit with the ABI-specified status
-//! code (`runtime-abi.md` §3.8 table). WASM: execute an `unreachable` trap, which
-//! the host test harness reports as an abort, distinguishing kinds by the
-//! accompanying message.
+//! code (`runtime-abi.md` §3.8 table). WASM: emit the same message via the host
+//! `host.write_stderr` import (§3.7), then execute an `unreachable` trap — so the
+//! accompanying stderr is present on both targets, in the same format, for the
+//! harness to match on (delta D-B3).
+
+/// Host stderr-write import (`runtime-abi.md` §3.7): `host.write_stderr(ptr, len)`
+/// writes `len` bytes of linear memory at `ptr` to the process's stderr. The WASM
+/// abort path emits the §3.8 message through it before trapping (delta D-B3).
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "host")]
+extern "C" {
+    fn host_write_stderr(ptr: *const u8, len: i32);
+}
 
 /// Abort the process with `msg` on stderr and `code` as the exit status (native),
-/// or an `unreachable` trap (WASM). Never returns.
+/// or emit `msg` via the host stderr-write import (§3.7) and `unreachable`-trap
+/// (WASM). Never returns.
 pub(crate) fn runtime_abort(msg: &str, code: i32) -> ! {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -15,7 +26,14 @@ pub(crate) fn runtime_abort(msg: &str, code: i32) -> ! {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (msg, code);
+        let _ = code;
+        // Emit the documented §3.8 message before the trap (delta D-B3) so the
+        // WASM stderr matches native; the host buffers it and prints it once.
+        // SAFETY: `msg` is a valid `&str` (ptr+len of initialized UTF-8 bytes);
+        // the import only reads `len` bytes of linear memory at `ptr`.
+        unsafe {
+            host_write_stderr(msg.as_ptr(), msg.len() as i32);
+        }
         core::arch::wasm32::unreachable()
     }
 }
