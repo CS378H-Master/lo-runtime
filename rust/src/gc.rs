@@ -165,6 +165,32 @@ unsafe fn collect() {
 
     // 4. Commit: swap the semispace roles; the old from-space is now free.
     crate::alloc::flip(free);
+
+    // Debug instrumentation (off unless `LO_GC_POISON` is set): scribble the
+    // just-abandoned from-space with a poison byte. Survivors were already copied
+    // out to the new from-space, so this only clobbers garbage and tombstones —
+    // but it turns any *stale* pointer (one the collector did not relocate because
+    // it was not a registered root) into a deterministic read of `0xEFEFEFEF…`
+    // instead of its possibly-still-intact old bytes. That makes a missing
+    // GC root a hard failure rather than a flaky one (see the WS-11 GC-rooting
+    // stress test). Not part of the ABI; zero cost when disabled.
+    if poison_enabled() {
+        let len = (from_limit as usize) - (from_base as usize);
+        core::ptr::write_bytes(from_base, 0xEF, len);
+    }
+}
+
+/// Whether `LO_GC_POISON` requests poisoning the abandoned from-space after each
+/// collection (debug aid; see `collect`). Read once and cached. Always false on
+/// freestanding WASM (no environment).
+fn poison_enabled() -> bool {
+    use std::sync::OnceLock;
+    static POISON: OnceLock<bool> = OnceLock::new();
+    *POISON.get_or_init(|| {
+        std::env::var("LO_GC_POISON")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false)
+    })
 }
 
 #[cfg(test)]
