@@ -7,9 +7,9 @@
   and lo-compiler/vendor/spec/runtime-abi.md. Edits made directly here will be
   overwritten by the next re-vendor.
   Last re-vendored: 2026-06-03 from planning/runtime-abi.md
-    (WS-11 Phase-B deltas: §4.1/§4.2 single-linked-module WASM model [D-B1];
-     §3.7 host stderr import + §3.8 message-before-trap [D-B3];
-     §4.4 rewording — Cheney reference-on-main, strings/casts team-implemented).
+    (latest: §3.7 eof()-guard guidance clarified — robust for line/read_string
+     loops, not token read_int/read_bool loops on trailing whitespace.
+     Earlier this date: WS-11 Phase-B deltas D-B1/D-B3 + §4.4 rewording.)
   ============================================================================
 -->
 
@@ -233,7 +233,7 @@ Read semantics:
 - `lo_read_int` reads the next integer token from stdin, skipping leading whitespace. Aborts with `lo_read_int: malformed token` and exit status 110 on bad input, or `lo_read_int: end of input` and exit status 111 on EOF before any integer characters.
 - `lo_read_bool` reads the next whitespace-delimited token and accepts `true` or `false`. Aborts with `lo_read_bool: invalid token` and exit status 112 on anything else.
 - `lo_read_string` reads up to the next newline; the newline is consumed but excluded from the returned `StringObject`. Returns the empty string on immediate end-of-input — use `lo_eof` to disambiguate end-of-input from a blank line.
-- `lo_eof` returns `true` iff stdin is at end-of-input without consuming any bytes. It is the standard guard for loop termination when the input length is not known in advance.
+- `lo_eof` returns `true` iff stdin is at end-of-input without consuming any bytes. It is a robust loop guard for **line-oriented** input: `while ( ! eof() ) { s = read_string(); … }` terminates cleanly, because `read_string` consumes its trailing newline, so after the last line the stream is at end-of-input. For **token** input (`lo_read_int` / `lo_read_bool`), `eof()` is **not** a robust guard on its own: it consumes no bytes and the token reads skip leading whitespace, so any trailing whitespace (e.g. a final newline) leaves `eof()` reporting not-at-end after the last token — `while ( ! eof() ) { read_int(); }` then reads once more and aborts with exit 111. Token-reading loops should read an explicit count first (read `n`, then read `n` values) or consume input of known exact length.
 
 The I/O surface is the lowering target for the synthetic `Input` and `Output` standard-preamble classes documented in `lo-3-reference.md` §4.6, accessed by user code through the three pre-bound names `in`, `out`, `err`. The preamble classes and pre-bound names are codegen-side recognition patterns, not runtime concepts; the ABI only exposes the entry points and lets codegen do the binding.
 
