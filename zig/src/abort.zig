@@ -1,10 +1,26 @@
 //! Runtime aborts (`runtime-abi.md` §3.8). Native: message to stderr + exit with
-//! the ABI status code. WASM: `unreachable` trap, which the host harness reports
+//! the ABI status code. WASM: a `@trap()`, which the host harness reports
 //! (distinguishing kinds by the accompanying message).
 //!
 //! Each abort has a native and a WASM implementation selected at comptime, so the
 //! untaken one is never analyzed (the native bodies reference `std.process`/
 //! stderr, which freestanding WASM lacks).
+//!
+//! ## Why `@trap()`, not the `unreachable` keyword (WASM)
+//!
+//! The WASM aborts emit a real trap via the `@trap()` builtin (it lowers to the
+//! `unreachable` WASM opcode). They must **not** use Zig's `unreachable`
+//! *keyword*: in `ReleaseSmall` / `ReleaseFast` that keyword is *undefined
+//! behavior* — it tells the optimizer "this path is never reached" rather than
+//! emitting a trap. At a call site like `lo_alloc`'s
+//! `bumpIfFits(size) orelse runtimeAbort(...)`, an `unreachable`-based abort lets
+//! the optimizer conclude the post-collection retry can never return null and
+//! **delete the whole OOM-abort branch**; a genuine live-set overflow then
+//! silently continues with a bogus slot instead of trapping (exit 137), so the
+//! unbounded-allocation OOM test never terminates. `@trap()` is a real
+//! side-effecting terminator the optimizer preserves — the Zig analog of the Rust
+//! reference's `core::arch::wasm32::unreachable()` intrinsic (NOT Rust's
+//! `unreachable!()` macro). This was delta D-B4 / R14.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -23,7 +39,7 @@ fn abortNative(msg: []const u8, code: u8) noreturn {
 fn abortWasm(msg: []const u8, code: u8) noreturn {
     _ = msg;
     _ = code;
-    unreachable;
+    @trap();
 }
 
 /// Abort on a null receiver at method dispatch (`runtime-abi.md` §3.8). Codegen
@@ -49,5 +65,5 @@ fn nullReceiverNative(method_name: ?[*]const u8, method_name_len: u32) noreturn 
 fn nullReceiverWasm(method_name: ?[*]const u8, method_name_len: u32) noreturn {
     _ = method_name;
     _ = method_name_len;
-    unreachable;
+    @trap();
 }
