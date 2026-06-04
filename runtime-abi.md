@@ -1,3 +1,18 @@
+<!--
+  ============================================================================
+  VENDORED COPY — DO NOT EDIT HERE.
+  Canonical source: runtime-abi.md in the (private) planning repo.
+  This file is a snapshot, refreshed by re-vendoring whenever the canonical ABI
+  changes. Re-vendor into BOTH consumers: this file (lo-runtime/runtime-abi.md)
+  and lo-compiler/vendor/spec/runtime-abi.md. Edits made directly here will be
+  overwritten by the next re-vendor.
+  Last re-vendored: 2026-06-03 from planning/runtime-abi.md
+    (WS-11 Phase-B deltas: §4.1/§4.2 single-linked-module WASM model [D-B1];
+     §3.7 host stderr import + §3.8 message-before-trap [D-B3];
+     §4.4 rewording — Cheney reference-on-main, strings/casts team-implemented).
+  ============================================================================
+-->
+
 # CS 378H — LO Runtime ABI Specification
 
 **Fall 2026.**
@@ -211,7 +226,7 @@ extern "C" fn lo_read_string() -> *mut Object
 extern "C" fn lo_eof() -> bool
 ```
 
-On native, these wrap libc `printf` / `puts` for output and `scanf` / `fgets` for input. On WASM, they import host functions provided by the test harness — typically `print_int`, `read_int`, etc., resolved at module instantiation; the harness wires the read functions to whatever input source it uses.
+On native, these wrap libc `printf` / `puts` for output and `scanf` / `fgets` for input. On WASM, they import host functions provided by the test harness — typically `print_int`, `read_int`, etc., resolved at module instantiation; the harness wires the read functions to whatever input source it uses. The host also provides a stderr-write import — `host.write_stderr(ptr: i32, len: i32)`, writing `len` bytes of linear memory at `ptr` to the process's stderr — which the runtime uses to emit abort messages before trapping (§3.8); it is the WASM analog of the native abort path's direct stderr write.
 
 Read semantics:
 
@@ -246,7 +261,7 @@ A summary of all native exit codes emitted by the runtime, for cross-reference:
 | 120 | `string_repeat` negative count | `lo_string_repeat` (§3.2) |
 | 137 | Heap exhausted | `lo_alloc` (§3.1) |
 
-WASM equivalents are `unreachable` traps; the host test harness distinguishes traps by their accompanying stderr message (the same message format documented at each emitting function).
+WASM equivalents are `unreachable` traps, each **preceded by the runtime emitting the documented message** through the host stderr-write import (§3.7) — so the accompanying stderr message is present, in the same format as native, for the harness to match on. *(Earlier the WASM abort path discarded the message and trapped silently; restored 2026-06-03 per delta D-B3, for parity with native and so that distinguishing abort kinds does not depend on link-surviving symbol names in a backtrace.)*
 
 ---
 
@@ -257,7 +272,7 @@ WASM equivalents are `unreachable` traps; the host test harness distinguishes tr
 Each skeleton compiles to one native artifact plus one WASM artifact:
 
 - A static library (`liblo_runtime.a` or platform-equivalent) for native AOT linkage on `x86_64-linux-gnu`.
-- A WASM module (`lo_runtime.wasm`) imported by the student WASM module on `wasm32-unknown-unknown`.
+- A WASM **static library** (an archive of relocatable `wasm32-unknown-unknown` objects, e.g. `liblo_runtime.a` under the wasm target directory) that the student's WASM object is linked against into a single module. *(Prior to 2026-06-03 this was a separately-instantiated `lo_runtime.wasm` module; §4.2 explains why the single-linked-module model replaced it.)*
 
 Build commands and per-language tooling — Cargo for Rust, `build.zig` for Zig, CMake for C++ — are documented in each skeleton's own `README.md`. The artifacts produced are interchangeable: you can link against `liblo_runtime.a` from any of the three skeletons and the result behaves identically.
 
@@ -265,15 +280,15 @@ Build commands and per-language tooling — Cargo for Rust, `build.zig` for Zig,
 
 **Native.** The student's compiler emits assembly with unresolved references to `lo_alloc`, `lo_string_concat`, etc. The system assembler turns the assembly into an object file; the system linker resolves the references against `liblo_runtime.a`. Emit standard PLT/GOT relocations.
 
-**WASM.** The student's WASM module declares the runtime functions as imports:
+**WASM.** The student's compiler emits the program as a *relocatable* WASM object (the LLVM `wasm32-unknown-unknown` object format) with unresolved references to `lo_alloc`, `lo_string_concat`, etc. That object is linked against the runtime WASM static library (§4.1) with `wasm-ld` (`rust-lld -flavor wasm`) into a **single module with one linear memory**:
 
 ```
-(import "lo_runtime" "lo_alloc" (func (param i32) (result i32)))
-(import "lo_runtime" "lo_string_concat" (func (param i32 i32) (result i32)))
-...
+wasm-ld --no-entry --export=lo_entry --allow-undefined student.o liblo_runtime.a -o program.wasm
 ```
 
-The host (test harness) instantiates the runtime module first, then instantiates the student module with the runtime's exports as the import object.
+A single linked module is required because object pointers are `i32` offsets into linear memory: the student's static data (class descriptors, string literals) and the runtime's static data, shadow-stack region, and heap must share one memory, and the linker is what lays them out contiguously without collision. The runtime's `host` I/O functions (§3.7) remain imports, supplied by the host at instantiation; the linked module exports `memory` and the synthesized entry `lo_entry` (`() -> i32`, returning the program's exit status).
+
+*(This replaces the pre-2026-06-03 two-module import model — where the student module declared `(import "lo_runtime" …)` functions and the host instantiated the runtime module first, then the student module with the runtime's exports as the import object. That model was infeasible: two separately-instantiated modules get separate linear memories with no way to share pointers or coordinate static-data / stack / heap layout within one memory. Surfaced by WS-11 Phase B, delta D-B1; DC-confirmed 2026-06-03.)*
 
 ### 4.3 Skeleton repository structure
 
@@ -321,19 +336,20 @@ Tests live at the repo root because they are LO programs and language-agnostic. 
 - `lo_runtime_init` / `lo_runtime_shutdown`.
 - All `lo_print_*`, `lo_println`, `lo_read_*`, and `lo_eof` functions.
 - `lo_push_frame` / `lo_pop_frame` (the linked-list mechanics).
-- A bump allocator backing `lo_alloc` — works until the heap is full, then aborts.
+- `lo_alloc`, backed by the **reference Cheney semispace collector** (WS-2, in the GC file): allocation works out of the box, and an allocation that would exhaust the heap drives a Cheney collection rather than failing — it aborts with `lo_alloc: out of memory` (exit 137) only when a full collection still cannot free enough room.
 - `lo_gc_write_barrier` as a bare-store no-op (correct for non-generational collectors out of the box).
 - `lo_abort_null_receiver` — writes the documented message and exits / traps.
 
 **Stubbed (team implements):**
 
-- The GC implementation file (`gc.rs`, `gc.zig`, or `gc.cpp`) — `lo_gc_collect` is `unimplemented!()` / `unreachable` / `throw`.
-- The OOM path in `lo_alloc` — currently aborts; team adds GC trigger plus retry.
+- The GC: the GC file (`gc.rs`, `gc.zig`, or `gc.cpp`) ships with the reference Cheney collector (above) as a **worked example**; the P3 task is to **replace it with a *different* collector from the menu** (mark-compact or generational), keeping the same `lo_alloc`-driven trigger-then-retry-then-abort-137 contract. The reference is the model, not a pass on the assignment — submitting Cheney unchanged is not P3.
 - All five string operations.
 - `lo_cast_check` / `lo_instanceof`.
 - For teams choosing a generational GC: replace `lo_gc_write_barrier`'s bare-store implementation with the real barrier logic.
 
-The stubs are real enough that the skeleton compiles, links, and runs. Programs that don't allocate beyond the initial heap and don't use strings will run end-to-end against the unmodified skeleton. As teams implement, more test programs pass.
+The stubs are real enough that the skeleton compiles, links, and runs. Programs that don't use strings — and, in LO-4, don't use casts — run end-to-end against the unmodified skeleton, since allocation is backed by the reference collector. As teams implement the remaining pieces, more test programs pass.
+
+*(Note on the reference apparatus: the instructor's grading runtime additionally carries reference implementations of the five string operations and the cast/`instanceof` checks, which are **not** shipped in this skeleton precisely because implementing them is the student's task — for strings, the whole task. They live in the private grading apparatus, not here. Cheney is the deliberate exception: it ships as a reference because the P3 GC task is to build a *different* collector, so the reference does not pre-empt the assignment. See planning WS-14.)*
 
 ### 4.5 Cross-skeleton conformance
 
