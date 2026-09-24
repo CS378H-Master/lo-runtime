@@ -15,7 +15,7 @@ The instructor provides three reference skeletons — one each in Rust, Zig, and
 - Pointer sizes follow the target: 64 bits on `x86_64-linux`; 32 bits on `wasm32-unknown-unknown`. Struct sizes given below assume 64-bit pointers. WASM teams adjust pointer-sized fields accordingly. The course targets x86-64 only; see `architecture-reference.md`.
 - Integer types follow C99 conventions: `u32`, `i32`, `u64`, `i64`.
 - The runtime is single-threaded; concurrency is out of scope unless a team's LO-5 brings it in.
-- Every runtime entry point is a *safepoint*: it may trigger GC. Codegen must ensure all live pointer roots are reflected on the shadow stack before any runtime call.
+- Every runtime entry point is a *safepoint*: it may trigger GC. Codegen must ensure all live pointer-typed values (locals, formals and temporaries alike) are reflected on the shadow stack before any runtime call, and that dead root slots hold null (§3.3).
 
 ---
 
@@ -141,7 +141,7 @@ Codegen pattern at function exit (immediately before return):
 lo_pop_frame();
 ```
 
-At each safepoint (just before any call that may trigger GC — which includes all `lo_*` calls), codegen updates `frame.roots[i]` for each live pointer-typed local. The runtime maintains a single `current_frame` pointer (LO is single-threaded, so one suffices); `lo_push_frame` swaps it with the new frame's parent slot, and `lo_pop_frame` restores.
+At each safepoint (just before any call that may trigger GC — which includes all `lo_*` calls), codegen ensures that every live pointer-typed *value* (a local, a formal, or a compiler temporary, wherever it is otherwise homed, a callee-saved register included) is in a `frame.roots[i]` slot, and that a root slot whose value is dead holds null rather than a stale address. <!-- delta 2026-09-18 (DC, on the L10 build's root-set computation): was "for each live pointer-typed local". A temporary holding a freshly allocated object across its constructor call is the clearest case the old wording missed; a stale address in a dead root slot would be followed on the next collection and, after a flip, would point at reused memory. --> The runtime maintains a single `current_frame` pointer (LO is single-threaded, so one suffices); `lo_push_frame` swaps it with the new frame's parent slot, and `lo_pop_frame` restores.
 
 ### 3.4 GC operations
 
