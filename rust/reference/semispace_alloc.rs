@@ -24,7 +24,7 @@ use core::alloc::Layout;
 use core::ptr;
 
 use crate::descriptors::LO_STRING_CLASS;
-use crate::exit_codes::EXIT_OOM;
+use crate::heap_layout::{aligned_size, lo_alloc_oom, string_size};
 use crate::object::{ClassDescriptor, Object, StringObject};
 
 /// Default total heap size (16 MiB), overridable via `LO_HEAP_SIZE` at init.
@@ -32,9 +32,6 @@ const DEFAULT_HEAP_SIZE: usize = 16 * 1024 * 1024;
 /// All allocations (and each semispace base) are aligned to this; covers
 /// `Object`'s 8-byte pointer field with headroom.
 const HEAP_ALIGN: usize = 16;
-/// Every allocation's size is rounded up to this so `Object`'s 8-byte pointer
-/// field (native) stays aligned within the semispace.
-use crate::heap_layout::{aligned_size, string_size, oom};
 
 /// Base of the whole backing region (for `dealloc`); null when uninitialized.
 static mut HEAP_BASE: *mut u8 = ptr::null_mut();
@@ -126,7 +123,7 @@ unsafe fn alloc_raw(size: usize, class: *const ClassDescriptor) -> *mut Object {
         crate::gc::lo_gc_collect();
         let retry = bump_if_fits(size);
         if retry.is_null() {
-            crate::abort::runtime_abort("lo_alloc: out of memory", EXIT_OOM);
+            lo_alloc_oom();
         }
         retry
     };
@@ -172,7 +169,7 @@ unsafe fn bump_if_fits(size: usize) -> *mut u8 {
 /// least `size_of::<Object>()`.
 #[no_mangle]
 pub unsafe extern "C" fn lo_alloc(class: *const ClassDescriptor) -> *mut Object {
-    let size = aligned_size((*class).instance_size as usize).unwrap_or_else(|| oom());
+    let size = aligned_size((*class).instance_size as usize).unwrap_or_else(|| lo_alloc_oom());
     alloc_raw(size, class)
 }
 
@@ -188,7 +185,7 @@ pub unsafe extern "C" fn lo_alloc(class: *const ClassDescriptor) -> *mut Object 
 /// Must be called after `heap_init`. Returns a valid `*mut Object`/`*mut
 /// StringObject` or aborts on OOM.
 pub(crate) unsafe fn bump_alloc_string(len: u32) -> *mut Object {
-    let size = string_size(len as usize).unwrap_or_else(|| oom());
+    let size = string_size(len as usize).unwrap_or_else(|| lo_alloc_oom());
     let obj = alloc_raw(size, &LO_STRING_CLASS);
     let so = obj as *mut StringObject;
     (*so).length = len;

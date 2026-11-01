@@ -66,9 +66,9 @@ unsafe fn object_size(p: *mut Object) -> usize {
     let class = (*p).class_descriptor;
     if core::ptr::eq(class, &LO_STRING_CLASS) {
         let so = p as *const StringObject;
-        crate::heap_layout::string_size((*so).length as usize).unwrap_or_else(|| crate::heap_layout::oom())
+        crate::heap_layout::string_size((*so).length as usize).unwrap_or_else(|| crate::heap_layout::lo_alloc_oom())
     } else {
-        crate::heap_layout::aligned_size((*class).instance_size as usize).unwrap_or_else(|| crate::heap_layout::oom())
+        crate::heap_layout::aligned_size((*class).instance_size as usize).unwrap_or_else(|| crate::heap_layout::lo_alloc_oom())
     }
 }
 

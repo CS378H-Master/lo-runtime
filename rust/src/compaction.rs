@@ -40,14 +40,14 @@ impl Scratch {
 
     pub fn push_work(&mut self, offset: usize) {
         if self.worklist.len() == self.worklist.capacity() {
-            crate::heap_layout::oom();
+            crate::heap_layout::lo_alloc_oom();
         }
         self.worklist.push(offset);
     }
 
     pub fn push_relocation(&mut self, relocation: Relocation) {
         if self.relocations.len() == self.relocations.capacity() {
-            crate::heap_layout::oom();
+            crate::heap_layout::lo_alloc_oom();
         }
         self.relocations.push(relocation);
     }
@@ -57,7 +57,7 @@ static mut SCRATCH: Option<Scratch> = None;
 
 pub(crate) fn init(heap_bytes: usize) {
     shutdown();
-    let scratch = Scratch::new(heap_bytes).unwrap_or_else(|_| crate::heap_layout::oom());
+    let scratch = Scratch::new(heap_bytes).unwrap_or_else(|_| crate::heap_layout::lo_alloc_oom());
     unsafe { SCRATCH = Some(scratch) };
 }
 
