@@ -1,24 +1,24 @@
-//! String operations (`runtime-abi.md` §3.2). All **stubbed** — the team
-//! implements these in P3. Each carries the exact C-ABI signature so the
-//! skeleton links; calling one panics with a recognizable message.
-//!
-//! Implementation hints for the team live in the ABI: `lo_string_repeat` aborts
-//! on negative count (exit 120); `lo_string_compare` is lexicographic UTF-8 byte
-//! ordering; `lo_string_reverse` reverses codepoints, not bytes. The internal
-//! variable-size allocator to build results with is `alloc::bump_alloc_string`.
+//! UTF-8 String operations. Inputs are copied before managed allocation can move them.
 
-use crate::exit_codes::{EXIT_NEGATIVE_REPEAT, EXIT_OOM};
+use crate::exit_codes::EXIT_NEGATIVE_REPEAT;
 use crate::object::{string_data_offset, Object, StringObject};
 
-unsafe fn bytes(object: *mut Object) -> &'static [u8] {
+unsafe fn bytes<'a>(object: *const Object) -> &'a [u8] {
     let string = object as *const StringObject;
     let length = (*string).length as usize;
     core::slice::from_raw_parts((object as *const u8).add(string_data_offset()), length)
 }
 
+fn buffer(length: usize) -> Vec<u8> {
+    crate::heap_layout::string_size(length).unwrap_or_else(|| crate::heap_layout::lo_alloc_oom());
+    let mut contents = Vec::new();
+    contents.try_reserve_exact(length).unwrap_or_else(|_| crate::heap_layout::lo_alloc_oom());
+    contents
+}
+
 unsafe fn allocate_bytes(contents: &[u8]) -> *mut Object {
     let length = u32::try_from(contents.len())
-        .unwrap_or_else(|_| crate::abort::runtime_abort("lo_alloc: out of memory", EXIT_OOM));
+        .unwrap_or_else(|_| crate::heap_layout::lo_alloc_oom());
     let object = crate::alloc::bump_alloc_string(length);
     if !contents.is_empty() {
         core::ptr::copy_nonoverlapping(
@@ -38,7 +38,10 @@ unsafe fn allocate_bytes(contents: &[u8]) -> *mut Object {
 #[no_mangle]
 pub unsafe extern "C" fn lo_string_new(bytes: *const u8, len: u32) -> *mut Object {
     // Copy before allocating because the managed allocation may trigger GC.
-    let contents = core::slice::from_raw_parts(bytes, len as usize).to_vec();
+    let mut contents = buffer(len as usize);
+    if len != 0 {
+        contents.extend_from_slice(core::slice::from_raw_parts(bytes, len as usize));
+    }
     allocate_bytes(&contents)
 }
 
@@ -54,8 +57,8 @@ pub unsafe extern "C" fn lo_string_concat(a: *mut Object, b: *mut Object) -> *mu
     let length = a
         .len()
         .checked_add(b.len())
-        .unwrap_or_else(|| crate::abort::runtime_abort("lo_alloc: out of memory", EXIT_OOM));
-    let mut contents = Vec::with_capacity(length);
+        .unwrap_or_else(|| crate::heap_layout::lo_alloc_oom());
+    let mut contents = buffer(length);
     contents.extend_from_slice(a);
     contents.extend_from_slice(b);
     allocate_bytes(&contents)
@@ -75,9 +78,9 @@ pub unsafe extern "C" fn lo_string_repeat(s: *mut Object, n: i32) -> *mut Object
     let length = input
         .len()
         .checked_mul(n as usize)
-        .unwrap_or_else(|| crate::abort::runtime_abort("lo_alloc: out of memory", EXIT_OOM));
-    let mut contents = Vec::with_capacity(length);
-    for _ in 0..n {
+        .unwrap_or_else(|| crate::heap_layout::lo_alloc_oom());
+    let mut contents = buffer(length);
+    for _ in 0..if input.is_empty() { 0 } else { n } {
         contents.extend_from_slice(input);
     }
     allocate_bytes(&contents)
@@ -105,6 +108,10 @@ pub unsafe extern "C" fn lo_string_compare(a: *mut Object, b: *mut Object) -> i3
 #[no_mangle]
 pub unsafe extern "C" fn lo_string_reverse(s: *mut Object) -> *mut Object {
     let input = core::str::from_utf8_unchecked(bytes(s));
-    let contents: String = input.chars().rev().collect();
-    allocate_bytes(contents.as_bytes())
+    let mut contents = buffer(input.len());
+    for ch in input.chars().rev() {
+        let mut encoded = [0; 4];
+        contents.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
+    }
+    allocate_bytes(&contents)
 }
