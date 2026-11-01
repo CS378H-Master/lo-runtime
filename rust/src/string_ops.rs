@@ -3,9 +3,6 @@
 use crate::exit_codes::EXIT_NEGATIVE_REPEAT;
 use crate::object::{string_data_offset, Object, StringObject};
 
-/// The managed bytes of `object`. Read from the raw pointer: the tail lies past
-/// the `Object` header, outside what a `&Object` may access. The slice is only
-/// valid until the next managed allocation, which may move the string.
 unsafe fn bytes<'a>(object: *const Object) -> &'a [u8] {
     let string = object as *const StringObject;
     let length = (*string).length as usize;

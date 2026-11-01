@@ -32,9 +32,7 @@ pub(crate) unsafe fn object_size(object: *const Object) -> Option<usize> {
     }
 }
 
-/// The one OOM abort. Never inlined: on WASM, `wasmrun` picks the exit code from
-/// the trap backtrace, and only a frame named `lo_alloc*` maps to 137, so an OOM
-/// inside a string operation must still trap in this frame.
+/// Never inlined: wasmrun maps a trap to exit 137 only from a `lo_alloc*` frame.
 #[cold]
 #[inline(never)]
 pub(crate) fn lo_alloc_oom() -> ! {
